@@ -23,6 +23,7 @@ from typing import Optional, Tuple
 
 from PIL import Image
 import numpy as np
+import enchant
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -37,24 +38,30 @@ MODEL_PATH = os.path.join(APP_DIR, 'cnn8grps_rad1_model.h5')
 app = Flask(__name__)
 CORS(app)
 
+try:
+    ddd = enchant.Dict("en_US")
+except Exception as e:
+    print("Warning: enchant not available. Suggestions disabled.")
+    ddd = None
+
 mp_hands = mp.solutions.hands
 hands1 = mp_hands.Hands(
-    static_image_mode=False,
+    static_image_mode=True,
     max_num_hands=1,
     model_complexity=1,
-    min_detection_confidence=0.85,
-    min_tracking_confidence=0.85
+    min_detection_confidence=0.6,
+    min_tracking_confidence=0.6
 )
 hands2 = mp_hands.Hands(
     static_image_mode=True,
     max_num_hands=1,
     model_complexity=1,
-    min_detection_confidence=0.85,
-    min_tracking_confidence=0.85
+    min_detection_confidence=0.6,
+    min_tracking_confidence=0.6
 )
 
 offset = 29
-confidence_threshold = 0.8
+confidence_threshold = 0.25
 
 MODEL = None
 INPUT_H = INPUT_W = None
@@ -80,7 +87,9 @@ def decode_data_url_to_cvimg(data_url: str) -> np.ndarray:
     pil = Image.open(io.BytesIO(data)).convert('RGB')
     arr = np.array(pil)
     # convert RGB to BGR for cv2
-    return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    img = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    img = cv2.flip(img, 1)
+    return img
 
 
 def build_white_hand_image_and_pts(cvimg: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[list]]:
@@ -145,6 +154,7 @@ def build_white_hand_image_and_pts(cvimg: np.ndarray) -> Tuple[Optional[np.ndarr
     for i in range(21):
         cv2.circle(white, (pts[i][0] + os_, pts[i][1] + os1), 3, (0,0,255), -1)
 
+    cv2.imwrite("debug_api.png", white)
     return white, pts
 
 
@@ -157,8 +167,8 @@ def predict_from_white_image(res_image: np.ndarray, pts: list) -> Tuple[Optional
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     img = cv2.resize(img, (INPUT_W, INPUT_H))
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    inp = img_rgb.astype('float32') / 255.0
+    # Convert directly to normalized float32
+    inp = img.astype('float32') / 255.0
     inp = np.expand_dims(inp, axis=0)
 
     preds = MODEL.predict(inp, verbose=0)[0]
@@ -627,10 +637,36 @@ def predict():
         cvimg = decode_data_url_to_cvimg(image_b64)
         res_image, pts = build_white_hand_image_and_pts(cvimg)
         if res_image is None or pts is None:
-            return jsonify({'label': None, 'confidence': 0.0, 'error': 'no_hand_detected'})
+            return jsonify({'label': None, 'confidence': 0.0, 'error': 'no_hand_detected', 'hand_detected': False})
 
         label, confidence = predict_from_white_image(res_image, pts)
-        return jsonify({'label': label, 'confidence': float(confidence)})
+        
+        # Convert skeleton image to base64 for frontend
+        _, buffer = cv2.imencode('.png', res_image)
+        skeleton_b64 = "data:image/png;base64," + base64.b64encode(buffer).decode('utf-8')
+
+        return jsonify({
+            'label': label, 
+            'confidence': float(confidence),
+            'skeleton_image': skeleton_b64,
+            'hand_detected': True
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': 'internal_error', 'detail': str(e)}), 500
+
+@app.route('/suggest', methods=['POST'])
+def suggest():
+    try:
+        payload = request.get_json(force=True)
+        word = payload.get('word', '').strip()
+        
+        if not word or not ddd:
+            return jsonify({'suggestions': []})
+            
+        suggestions = ddd.suggest(word)
+        # Limit to top 4 suggestions
+        return jsonify({'suggestions': suggestions[:4]})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': 'internal_error', 'detail': str(e)}), 500

@@ -1,0 +1,28 @@
+# Python
+venv/
+venv311/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Environment
+.env
+
+# Model cache
+*.h5
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# Vite
+.vite/
+
+# Logs
+*.log
