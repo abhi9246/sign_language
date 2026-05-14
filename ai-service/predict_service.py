@@ -673,8 +673,8 @@ def suggest():
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PREDICT_PORT', 5001))
-    host = os.environ.get('PREDICT_HOST', '127.0.0.1')
+    port = int(os.environ.get('PORT', os.environ.get('PREDICT_PORT', 5001)))
+    host = os.environ.get('PREDICT_HOST', '0.0.0.0')
     # Attempt to preload model for faster first response
     try:
         ensure_model_loaded()
